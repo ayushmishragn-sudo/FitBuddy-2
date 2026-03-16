@@ -1,0 +1,4 @@
+[32mINFO[0m:     Will watch for changes in these directories: ['/home/runner/workspace']
+[32mINFO[0m:     Uvicorn running on [1mhttp://0.0.0.0:5000[0m (Press CTRL+C to quit)
+[32mINFO[0m:     Started reloader process [[36m[1m576[0m] using [36m[1mWatchFiles[0m
+[32mINFO[0m:     Stopping reloader process [[36m[1m576[0m]

@@ -1,0 +1,261 @@
+{% extends "base.html" %}
+{% block title %}FitBuddy – Your Plan, {{ user.name }}{% endblock %}
+
+{% block content %}
+<section class="result-hero">
+  <div class="result-hero-inner">
+    <div class="result-badge">
+      {% if feedback_success %}✅ Plan Updated!{% else %}✅ Plan Generated!{% endif %}
+    </div>
+    <h1>Hey <span class="accent">{{ user.name }}</span>,<br>your plan is ready.</h1>
+    <div class="user-tags">
+      <span class="tag">🎯 {{ user.goal }}</span>
+      <span class="tag">⚡ {{ user.intensity | capitalize }} Intensity</span>
+      <span class="tag">🧍 {{ user.age }} yrs · {{ user.weight }} kg</span>
+    </div>
+  </div>
+</section>
+
+{% if error %}
+<div class="alert alert-error container">
+  <span class="alert-icon">⚠️</span> {{ error }}
+</div>
+{% endif %}
+
+{% if feedback_success %}
+<div class="alert alert-success container">
+  <span class="alert-icon">🎉</span> Your plan has been updated based on your feedback!
+</div>
+{% endif %}
+
+<div class="result-grid container">
+
+  <!-- Workout Plan -->
+  <div class="plan-card">
+    <div class="plan-card-header">
+      <h2>💪 Your 7-Day Workout Plan</h2>
+      <button class="btn-copy" onclick="copyPlan()">Copy Plan</button>
+    </div>
+
+    <!-- Changes notice (for regenerated plans) -->
+    <div id="changesNotice" class="changes-notice" style="display:none"></div>
+
+    <!-- Accordion container -->
+    <div class="accordion" id="planAccordion"></div>
+
+    <!-- Hidden raw content for copy/fallback -->
+    <div id="planRaw" style="display:none">{{ plan.plan_content }}</div>
+  </div>
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+
+    {% if plan.nutrition_tip %}
+    <div class="tip-card">
+      <h3>🥗 Nutrition & Recovery</h3>
+      <div id="nutritionRaw" style="display:none">{{ plan.nutrition_tip }}</div>
+      <div id="nutritionCards" class="nutrition-cards"></div>
+    </div>
+    {% endif %}
+
+    <div class="feedback-card">
+      <h3>🔄 Refine Your Plan</h3>
+      <p>Not happy with something? Tell us what to change.</p>
+
+      {% if plan.feedback %}
+      <div class="prev-feedback">
+        <span class="prev-label">Your last feedback:</span>
+        <blockquote>{{ plan.feedback }}</blockquote>
+      </div>
+      {% endif %}
+
+      <form action="/feedback/{{ plan_id }}" method="POST" id="feedbackForm">
+        <textarea
+          name="feedback"
+          id="feedbackInput"
+          placeholder="e.g. Add more rest days, focus more on cardio, reduce leg exercises..."
+          rows="4"
+          required
+        ></textarea>
+        <button type="submit" class="btn-feedback" id="feedbackBtn">
+          <span class="btn-text">Update My Plan</span>
+          <span class="btn-loader" style="display:none;">Updating...</span>
+        </button>
+      </form>
+    </div>
+
+    <div class="actions-card">
+      <a href="/" class="btn-outline">← Create New Plan</a>
+      <button onclick="window.print()" class="btn-outline">🖨 Print Plan</button>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function copyPlan() {
+  const text = document.getElementById('planRaw').innerText;
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = document.querySelector('.btn-copy');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy Plan', 2000);
+  });
+}
+
+(function buildAccordion() {
+  const raw = document.getElementById('planRaw').innerText.trim();
+  const accordion = document.getElementById('planAccordion');
+  const changesNotice = document.getElementById('changesNotice');
+
+  let content = raw;
+
+  // Extract CHANGES: line if present (regenerated plans)
+  const changesMatch = content.match(/^CHANGES:\s*(.+)/m);
+  if (changesMatch) {
+    changesNotice.style.display = 'block';
+    changesNotice.innerHTML = '<span class="changes-icon">✏️</span> <strong>Changes made:</strong> ' + changesMatch[1].trim();
+    content = content.replace(/^CHANGES:.*\n?/m, '').trim();
+  }
+
+  // Split into day blocks by "---" separator
+  const dayBlocks = content.split(/^---\s*$/m).map(s => s.trim()).filter(Boolean);
+
+  if (dayBlocks.length === 0) {
+    // Fallback: show raw text
+    accordion.innerHTML = '<div class="plan-content">' + raw.replace(/\n/g, '<br>') + '</div>';
+    return;
+  }
+
+  const dayIcons = ['🌅','🔥','💪','⚡','🏃','🧘','🏆'];
+
+  dayBlocks.forEach((block, idx) => {
+    const lines = block.split('\n').map(l => l.trim()).filter(Boolean);
+    if (lines.length === 0) return;
+
+    // Parse day title: "DAY N - Focus Name"
+    const titleMatch = lines[0].match(/^DAY\s+(\d+)\s*[-–]\s*(.+)/i);
+    const dayNum = titleMatch ? parseInt(titleMatch[1]) : (idx + 1);
+    const focus = titleMatch ? titleMatch[2].trim() : lines[0];
+    const icon = dayIcons[(dayNum - 1) % dayIcons.length];
+
+    // Parse sections
+    let warmup = '', cooldown = '';
+    const exercises = [];
+
+    for (let i = 1; i < lines.length; i++) {
+      const line = lines[i];
+      if (/^WARMUP:/i.test(line)) {
+        warmup = line.replace(/^WARMUP:\s*/i, '');
+      } else if (/^COOLDOWN:/i.test(line)) {
+        cooldown = line.replace(/^COOLDOWN:\s*/i, '');
+      } else if (/^\d+\./.test(line)) {
+        exercises.push(line);
+      }
+    }
+
+    // Build exercise HTML
+    const exerciseHTML = exercises.map(ex => {
+      const parts = ex.match(/^(\d+)\.\s*(.+?)\s*[–-]\s*(.+)$/);
+      if (parts) {
+        return `<div class="exercise-row">
+          <span class="ex-num">${parts[1]}</span>
+          <div class="ex-info">
+            <span class="ex-name">${parts[2].trim()}</span>
+            <span class="ex-detail">${parts[3].trim()}</span>
+          </div>
+        </div>`;
+      }
+      return `<div class="exercise-row"><span class="ex-plain">${ex}</span></div>`;
+    }).join('');
+
+    const cardId = `day-${dayNum}`;
+    const isFirst = idx === 0;
+
+    const card = document.createElement('div');
+    card.className = 'acc-card' + (isFirst ? ' acc-open' : '');
+    card.innerHTML = `
+      <button class="acc-header" onclick="toggleAcc('${cardId}', this)" aria-expanded="${isFirst}">
+        <div class="acc-title">
+          <span class="acc-day-icon">${icon}</span>
+          <div>
+            <span class="acc-day-label">Day ${dayNum}</span>
+            <span class="acc-day-focus">${focus}</span>
+          </div>
+        </div>
+        <span class="acc-chevron">${isFirst ? '▲' : '▼'}</span>
+      </button>
+      <div class="acc-body" id="${cardId}" style="display:${isFirst ? 'block' : 'none'}">
+        ${warmup ? `<div class="acc-section warmup-section">
+          <div class="acc-section-label">🏃 Warm-up</div>
+          <p class="acc-section-text">${warmup}</p>
+        </div>` : ''}
+        <div class="acc-section workout-section">
+          <div class="acc-section-label">💪 Workout</div>
+          ${exerciseHTML}
+        </div>
+        ${cooldown ? `<div class="acc-section cooldown-section">
+          <div class="acc-section-label">🧘 Cool-down</div>
+          <p class="acc-section-text">${cooldown}</p>
+        </div>` : ''}
+      </div>
+    `;
+    accordion.appendChild(card);
+  });
+})();
+
+function toggleAcc(id, btn) {
+  const body = document.getElementById(id);
+  const card = btn.closest('.acc-card');
+  const isOpen = body.style.display !== 'none';
+  body.style.display = isOpen ? 'none' : 'block';
+  btn.querySelector('.acc-chevron').textContent = isOpen ? '▼' : '▲';
+  card.classList.toggle('acc-open', !isOpen);
+  btn.setAttribute('aria-expanded', String(!isOpen));
+}
+
+// ── Build Nutrition Cards ──
+(function buildNutrition() {
+  const rawEl = document.getElementById('nutritionRaw');
+  const container = document.getElementById('nutritionCards');
+  if (!rawEl || !container) return;
+
+  const raw = rawEl.innerText.trim();
+
+  const sections = [
+    { key: 'NUTRITION', icon: '🥗', label: 'Nutrition Focus', cls: 'nutr-nutrition' },
+    { key: 'HYDRATION', icon: '💧', label: 'Hydration',       cls: 'nutr-hydration' },
+    { key: 'RECOVERY',  icon: '😴', label: 'Recovery',        cls: 'nutr-recovery'  },
+    { key: 'QUICKTIP',  icon: '⚡', label: 'Quick Tip',       cls: 'nutr-quicktip'  },
+  ];
+
+  let parsed = {};
+  sections.forEach(({ key }) => {
+    const match = raw.match(new RegExp(key + ':\\s*(.+)', 'i'));
+    if (match) parsed[key] = match[1].trim();
+  });
+
+  // If none matched, fall back to raw text
+  const anyMatched = sections.some(s => parsed[s.key]);
+  if (!anyMatched) {
+    container.innerHTML = '<p class="nutr-fallback">' + raw.replace(/\n/g, '<br>') + '</p>';
+    return;
+  }
+
+  sections.forEach(({ key, icon, label, cls }) => {
+    if (!parsed[key]) return;
+    const card = document.createElement('div');
+    card.className = 'nutr-card ' + cls;
+    card.innerHTML = `
+      <div class="nutr-card-header">
+        <span class="nutr-icon">${icon}</span>
+        <span class="nutr-label">${label}</span>
+      </div>
+      <p class="nutr-text">${parsed[key]}</p>
+    `;
+    container.appendChild(card);
+  });
+})();
+</script>
+{% endblock %}
